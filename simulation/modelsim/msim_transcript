@@ -1,0 +1,58 @@
+# Reading C:/altera/13.0sp1/modelsim_ase/tcl/vsim/pref.tcl 
+# ERROR: No extended dataflow license exists
+# do med_fil_run_msim_rtl_verilog.do 
+# if {[file exists rtl_work]} {
+# 	vdel -lib rtl_work -all
+# }
+# vlib rtl_work
+# vmap work rtl_work
+# Copying C:\altera\13.0sp1\modelsim_ase\win32aloem/../modelsim.ini to modelsim.ini
+# Modifying modelsim.ini
+# ** Warning: Copied C:\altera\13.0sp1\modelsim_ase\win32aloem/../modelsim.ini to modelsim.ini.
+#          Updated modelsim.ini.
+# 
+# vlog -vlog01compat -work work +incdir+C:/Workspace/uit_k18/VHDL/Thuc_Hanh/Lab2/medium_filter {C:/Workspace/uit_k18/VHDL/Thuc_Hanh/Lab2/medium_filter/median_9.v}
+# Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+# -- Compiling module compare_swap
+# -- Compiling module median_9
+# -- Compiling module median_filter_opt
+# 
+# Top level modules:
+# 	median_filter_opt
+# 
+# vlog -vlog01compat -work work +incdir+C:/Workspace/uit_k18/VHDL/Thuc_Hanh/Lab2/medium_filter {C:/Workspace/uit_k18/VHDL/Thuc_Hanh/Lab2/medium_filter/tb_median_filter_opt.v}
+# Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+# -- Compiling module tb_median_filter_opt
+# 
+# Top level modules:
+# 	tb_median_filter_opt
+# 
+# vsim -t 1ps -L altera_ver -L lpm_ver -L sgate_ver -L altera_mf_ver -L altera_lnsim_ver -L cycloneii_ver -L rtl_work -L work -voptargs="+acc"  tb_median_filter_opt
+# vsim -L altera_ver -L lpm_ver -L sgate_ver -L altera_mf_ver -L altera_lnsim_ver -L cycloneii_ver -L rtl_work -L work -voptargs=\"+acc\" -t 1ps tb_median_filter_opt 
+# Loading work.tb_median_filter_opt
+# Loading work.median_filter_opt
+# Loading work.median_9
+# Loading work.compare_swap
+# ** Warning: (vsim-PLI-3691) C:/Workspace/uit_k18/VHDL/Thuc_Hanh/Lab2/medium_filter/median_9.v(140): Expected a system task, not a system function '$fscanf'.
+# 
+#         Region: /tb_median_filter_opt/uut
+# ** Warning: (vsim-PLI-3691) C:/Workspace/uit_k18/VHDL/Thuc_Hanh/Lab2/medium_filter/median_9.v(144): Expected a system task, not a system function '$fscanf'.
+# 
+#         Region: /tb_median_filter_opt/uut
+# 
+# add wave *
+# view structure
+# .main_pane.structure.interior.cs.body.struct
+# view signals
+# .main_pane.objects.interior.cs.body.tree
+# run -all
+# Image size:         554x        430
+# Processing complete!
+# Simulation completed successfully!
+# ** Note: $finish    : C:/Workspace/uit_k18/VHDL/Thuc_Hanh/Lab2/medium_filter/tb_median_filter_opt.v(27)
+#    Time: 4744925 ps  Iteration: 0  Instance: /tb_median_filter_opt
+# 1
+# Break in Module tb_median_filter_opt at C:/Workspace/uit_k18/VHDL/Thuc_Hanh/Lab2/medium_filter/tb_median_filter_opt.v line 27
+# Simulation Breakpoint: 1
+# Break in Module tb_median_filter_opt at C:/Workspace/uit_k18/VHDL/Thuc_Hanh/Lab2/medium_filter/tb_median_filter_opt.v line 27
+# MACRO ./med_fil_run_msim_rtl_verilog.do PAUSED at line 17
