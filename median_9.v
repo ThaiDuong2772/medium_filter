@@ -12,7 +12,6 @@ module compare_swap(
 endmodule
 
 // Module tính median của 9 giá trị sử dụng Sorting Network
-// Sử dụng Batcher's odd-even mergesort network
 module median_9(
     input [7:0] p0, p1, p2, p3, p4, p5, p6, p7, p8,
     output [7:0] median
@@ -84,7 +83,34 @@ module median_9(
 
 endmodule
 
-// Module chính - Median Filter
+// Module line buffer - lưu 2 dòng trước
+module line_buffer #(
+    parameter MAX_WIDTH = 512
+)(
+    input clk,
+    input rst,
+    input write_enable,
+    input [7:0] pixel_in,
+    input [9:0] write_addr,
+    input [9:0] read_addr1,
+    input [9:0] read_addr2,
+    output reg [7:0] pixel_out1,
+    output reg [7:0] pixel_out2
+);
+    reg [7:0] line1 [0:MAX_WIDTH-1];
+    reg [7:0] line2 [0:MAX_WIDTH-1];
+    
+    always @(posedge clk) begin
+        if (write_enable) begin
+            line2[write_addr] <= line1[write_addr];
+            line1[write_addr] <= pixel_in;
+        end
+        pixel_out1 <= line1[read_addr1];
+        pixel_out2 <= line2[read_addr2];
+    end
+endmodule
+
+// Module chính - Median Filter tối ưu pipeline
 module median_filter_opt #(
     parameter MAX_WIDTH = 512,
     parameter MAX_HEIGHT = 512
@@ -92,42 +118,90 @@ module median_filter_opt #(
     input clk,
     input rst,
     input start,
-    output reg done
+    output reg done,
+    output reg processing
 );
 
-    reg [7:0] image_in [0:MAX_HEIGHT*MAX_WIDTH-1];
-    reg [7:0] image_out [0:MAX_HEIGHT*MAX_WIDTH-1];
+    // Memory cho ảnh
+    reg [7:0] image_mem [0:MAX_HEIGHT*MAX_WIDTH-1];
     
-    integer height, width;
-    integer i;
-    integer file_in, file_out;
+    // Kích thước ảnh
+    reg [15:0] height, width;
+    reg [31:0] total_pixels;
     
-    reg [7:0] win0, win1, win2, win3, win4, win5, win6, win7, win8;
-    wire [7:0] median_out;
+    // Counter
+    reg [31:0] pixel_count;
+    reg [15:0] row, col;
     
-    // Instantiate median module
-    median_9 med9(
-        .p0(win0), .p1(win1), .p2(win2),
-        .p3(win3), .p4(win4), .p5(win5),
-        .p6(win6), .p7(win7), .p8(win8),
-        .median(median_out)
+    // Line buffer signals
+    wire [7:0] line1_out, line2_out;
+    reg [7:0] current_pixel;
+    reg line_buffer_we;
+    reg [9:0] lb_write_addr, lb_read_addr;
+    
+    // Window registers (3x3)
+    reg [7:0] w00, w01, w02;
+    reg [7:0] w10, w11, w12;
+    reg [7:0] w20, w21, w22;
+    
+    // Median calculation
+    wire [7:0] median_result;
+    
+    // Pipeline stages
+    reg [2:0] pipeline_stage;
+    reg [15:0] pipeline_row, pipeline_col;
+    reg [7:0] pipeline_pixel;
+    reg pipeline_valid;
+    
+    // Line buffer instance
+    line_buffer #(.MAX_WIDTH(MAX_WIDTH)) lb (
+        .clk(clk),
+        .rst(rst),
+        .write_enable(line_buffer_we),
+        .pixel_in(current_pixel),
+        .write_addr(lb_write_addr),
+        .read_addr1(lb_read_addr),
+        .read_addr2(lb_read_addr),
+        .pixel_out1(line1_out),
+        .pixel_out2(line2_out)
     );
     
-    reg [2:0] state;
-    localparam IDLE     = 3'd0;
-    localparam LOAD_WIN = 3'd1;
-    localparam CALC     = 3'd2;
-    localparam WRITE    = 3'd3;
-    localparam DONE_ST  = 3'd4;
+    // Median filter instance
+    median_9 median_calc (
+        .p0(w00), .p1(w01), .p2(w02),
+        .p3(w10), .p4(w11), .p5(w12),
+        .p6(w20), .p7(w21), .p8(w22),
+        .median(median_result)
+    );
     
-    integer row, col;
+    // State machine
+    reg [3:0] state;
+    localparam IDLE         = 4'd0;
+    localparam LOAD_IMAGE   = 4'd1;
+    localparam INIT_PROCESS = 4'd2;
+    localparam PROCESS_ROW0 = 4'd3;
+    localparam PROCESS_ROW1 = 4'd4;
+    localparam LOAD_WINDOW  = 4'd5;
+    localparam CALC_MEDIAN  = 4'd6;
+    localparam WRITE_PIXEL  = 4'd7;
+    localparam NEXT_PIXEL   = 4'd8;
+    localparam SAVE_IMAGE   = 4'd9;
+    localparam FINISH       = 4'd10;
+    
+    // File handles
+    integer file_in, file_out, status;
+    reg [31:0] addr;
     
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             state <= IDLE;
             done <= 0;
+            processing <= 0;
+            pixel_count <= 0;
             row <= 0;
             col <= 0;
+            line_buffer_we <= 0;
+            pipeline_valid <= 0;
         end else begin
             case (state)
                 IDLE: begin
@@ -135,88 +209,127 @@ module median_filter_opt #(
                         file_in = $fopen("C:/Workspace/uit_k18/VHDL/Thuc_Hanh/Lab2/medium_filter/pic_input.txt", "r");
                         if (file_in == 0) begin
                             $display("Error: Cannot open pic_input.txt");
-                            $finish;
+                            done <= 1;
+                        end else begin
+                            status = $fscanf(file_in, "%d %d\n", height, width);
+                            total_pixels = height * width;
+                            $display("Image size: %dx%d", height, width);
+                            pixel_count <= 0;
+                            addr <= 0;
+                            state <= LOAD_IMAGE;
+                            processing <= 1;
                         end
-                        $fscanf(file_in, "%d %d\n", height, width);
-                        $display("Image size: %dx%d", height, width);
-                        
-                        for (i = 0; i < height * width; i = i + 1) begin
-                            $fscanf(file_in, "%d\n", image_in[i]);
-                        end
+                    end
+                end
+                
+                LOAD_IMAGE: begin
+                    if (addr < total_pixels) begin
+                        status = $fscanf(file_in, "%d\n", image_mem[addr]);
+                        addr <= addr + 1;
+                    end else begin
                         $fclose(file_in);
-                        
                         row <= 0;
                         col <= 0;
-                        state <= LOAD_WIN;
+                        state <= INIT_PROCESS;
                     end
                 end
                 
-                LOAD_WIN: begin
-                    if (row < height) begin
-                        if (row == 0 || row == height-1 || col == 0 || col == width-1) begin
-                            // Biên: giữ nguyên giá trị
-                            image_out[row * width + col] <= image_in[row * width + col];
-                            
-                            // Chuyển sang pixel tiếp theo
-                            if (col >= width - 1) begin
-                                col <= 0;
-                                row <= row + 1;
-                            end else begin
-                                col <= col + 1;
-                            end
+                INIT_PROCESS: begin
+                    // Copy hàng đầu tiên (biên)
+                    if (col < width) begin
+                        image_mem[col] <= image_mem[col];
+                        col <= col + 1;
+                    end else begin
+                        row <= 1;
+                        col <= 0;
+                        state <= PROCESS_ROW1;
+                    end
+                end
+                
+                PROCESS_ROW1: begin
+                    if (row < height - 1) begin
+                        if (col == 0) begin
+                            // Biên trái
+                            image_mem[row * width] <= image_mem[row * width];
+                            col <= 1;
+                        end else if (col >= width - 1) begin
+                            // Biên phải
+                            image_mem[row * width + width - 1] <= image_mem[row * width + width - 1];
+                            row <= row + 1;
+                            col <= 0;
                         end else begin
-                            // Load 3x3 window
-                            win0 <= image_in[(row-1) * width + (col-1)];
-                            win1 <= image_in[(row-1) * width + col];
-                            win2 <= image_in[(row-1) * width + (col+1)];
-                            win3 <= image_in[row * width + (col-1)];
-                            win4 <= image_in[row * width + col];
-                            win5 <= image_in[row * width + (col+1)];
-                            win6 <= image_in[(row+1) * width + (col-1)];
-                            win7 <= image_in[(row+1) * width + col];
-                            win8 <= image_in[(row+1) * width + (col+1)];
-                            
-                            state <= CALC;
+                            // Load window 3x3
+                            addr <= (row - 1) * width + (col - 1);
+                            state <= LOAD_WINDOW;
                         end
                     end else begin
-                        state <= WRITE;
-                    end
-                end
-                
-                CALC: begin
-                    // Ghi kết quả median
-                    image_out[row * width + col] <= median_out;
-                    
-                    // Chuyển sang pixel tiếp theo
-                    if (col >= width - 1) begin
+                        // Copy hàng cuối (biên)
                         col <= 0;
-                        row <= row + 1;
-                    end else begin
+                        state <= PROCESS_ROW0;
+                    end
+                end
+                
+                LOAD_WINDOW: begin
+                    // Load 3x3 window từ memory
+                    w00 <= image_mem[(row-1) * width + (col-1)];
+                    w01 <= image_mem[(row-1) * width + col];
+                    w02 <= image_mem[(row-1) * width + (col+1)];
+                    w10 <= image_mem[row * width + (col-1)];
+                    w11 <= image_mem[row * width + col];
+                    w12 <= image_mem[row * width + (col+1)];
+                    w20 <= image_mem[(row+1) * width + (col-1)];
+                    w21 <= image_mem[(row+1) * width + col];
+                    w22 <= image_mem[(row+1) * width + (col+1)];
+                    
+                    pipeline_row <= row;
+                    pipeline_col <= col;
+                    state <= CALC_MEDIAN;
+                end
+                
+                CALC_MEDIAN: begin
+                    // Median được tính tổ hợp, chờ 1 cycle
+                    pipeline_pixel <= median_result;
+                    state <= WRITE_PIXEL;
+                end
+                
+                WRITE_PIXEL: begin
+                    // Ghi kết quả
+                    image_mem[pipeline_row * width + pipeline_col] <= pipeline_pixel;
+                    col <= col + 1;
+                    state <= PROCESS_ROW1;
+                end
+                
+                PROCESS_ROW0: begin
+                    if (col < width) begin
+                        image_mem[(height-1) * width + col] <= image_mem[(height-1) * width + col];
                         col <= col + 1;
+                    end else begin
+                        state <= SAVE_IMAGE;
+                        addr <= 0;
                     end
-                    
-                    state <= LOAD_WIN;
                 end
                 
-                WRITE: begin
-                    file_out = $fopen("C:/Workspace/uit_k18/VHDL/Thuc_Hanh/Lab2/medium_filter/pic_output.txt", "w");
-                    $fwrite(file_out, "%d %d\n", height, width);
-                    
-                    for (i = 0; i < height * width; i = i + 1) begin
-                        $fwrite(file_out, "%d\n", image_out[i]);
+                SAVE_IMAGE: begin
+                    if (addr == 0) begin
+                        file_out = $fopen("pic_output.txt", "w");
+                        $fwrite(file_out, "%d %d\n", height, width);
+                        addr <= 1;
+                    end else if (addr <= total_pixels) begin
+                        $fwrite(file_out, "%d\n", image_mem[addr-1]);
+                        addr <= addr + 1;
+                    end else begin
+                        $fclose(file_out);
+                        $display("Processing complete!");
+                        state <= FINISH;
                     end
-                    $fclose(file_out);
-                    
-                    $display("Processing complete!");
-                    state <= DONE_ST;
                 end
                 
-                DONE_ST: begin
+                FINISH: begin
                     done <= 1;
+                    processing <= 0;
                 end
             endcase
         end
     end
 
 endmodule
-
